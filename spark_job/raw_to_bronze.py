@@ -58,7 +58,7 @@ def main():
     new_files = [f for f in all_files if f not in processed_files]
 
     if not new_files:
-        print("✅ No new files to process.")
+        print("No new files to process.")
         return
 
     new_files_path = [os.path.join(RAWDATAPATH, f) for f in new_files]
@@ -70,7 +70,7 @@ def main():
     df.write.format("delta").mode("append").save(BRONZEDDATAPATH)
 
     save_processed_files(new_files)
-    print("✅ ETL to bronze completed successfully.")
+    print("ETL to bronze completed successfully.")
 
 if __name__ == "__main__":
     main()
