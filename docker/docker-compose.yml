@@ -1,0 +1,152 @@
+# version: '4'
+
+x-airflow-common:
+  &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__RELOAD_ON_PLUGIN_CHANGE: 'true'
+    AIRFLOW__WEBSERVER__SECRET_KEY: 'mysecretkey12aSdc./'
+  
+
+  volumes:
+    - ../dags:/opt/airflow/dags/
+    - ../data:/opt/airflow/data/
+    - ../src:/opt/airflow/src/
+    - ../spark_job:/opt/airflow/spark_job/
+    - ../processedFiles:/opt/airflow/processedFiles
+
+  user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-50000}"
+  depends_on:
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+#  networks:
+#    - my_network
+
+services:
+  postgres:
+    image: docker.arvancloud.ir/postgres:13
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - ../pg_volume:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "airflow" ]
+      interval: 5s
+      retries: 5
+    restart: always
+    networks:
+      - my_network
+    
+  redis:
+    image: docker.arvancloud.ir/redis:7.2.3
+    ports:
+      - 6379:6379
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 30s
+      retries: 50
+    restart: always
+    networks:
+      - my_network
+   
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - 8080:8080
+    healthcheck:
+      test: [ "CMD", "curl", "--fail", "http://localhost:8080/health" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+    networks:
+      - my_network
+  
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: always
+    networks:
+      - my_network
+   
+  airflow-worker1:
+    <<: *airflow-common
+    command: celery worker
+    restart: always
+    networks:
+      - my_network
+  
+  airflow-init:
+    <<: *airflow-common
+    command: version
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+    networks:
+      - my_network
+
+
+  spark-master:
+    build:
+      context: .
+      dockerfile: DockerFileSpark
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - "8081:8081"  # UI Master
+      - "7077:7077"  # Master port
+    volumes:
+      - ../data:/opt/airflow/data/
+      - ../src:/opt/bitnami/spark/src/
+      - ../spark_job:/opt/bitnami/spark/spark_job/
+      - ../processedFiles:/opt/airflow/processedFiles
+    networks:
+      - my_network
+
+
+  spark-worker1:
+    build:
+      context: .
+      dockerfile: DockerFileSpark
+    container_name: spark-worker1
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+    volumes:
+      - ../data:/opt/airflow/data/
+      - ../src:/opt/bitnami/spark/src/
+      - ../spark_job:/opt/bitnami/spark/spark_job/
+      - ../processedFiles:/opt/airflow/processedFiles
+    depends_on:
+      - spark-master
+    ports:
+      - "8082:8081"  # UI port برای این worker
+    networks:
+      - my_network
+
+networks:
+  my_network:
+    driver: bridge
+
