@@ -42,7 +42,7 @@ def save_processed_files(new_files):
     :param new_files:
     :return:
     """
-    with open(PROCESSEDDATAPATH, 'a') as f:  # <- حالت append
+    with open(PROCESSEDDATAPATH, 'a') as f: 
         for file in new_files:
             f.write(file + '\n')
 
